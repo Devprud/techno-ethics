@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PANOPTICON RUNNER</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{ --mono:"IBM Plex Mono","Lucida Console","Courier New",Courier,monospace; }
+  html,body{margin:0;height:100%;background:#020402;overflow:hidden;cursor:none}
+  body{display:flex;align-items:center;justify-content:center}
+  pre{margin:0;font-family:var(--mono);line-height:1.2;white-space:pre;color:#3dff7a;
+      text-shadow:0 0 5px rgba(61,255,122,.5);animation:flick 4s infinite}
+  .g{color:#3dff7a}
+  .d{color:#1c8a45;text-shadow:none}
+  .a{color:#ffb000;text-shadow:0 0 5px rgba(255,176,0,.55)}
+  .r{color:#ff4040;text-shadow:0 0 6px rgba(255,64,64,.6)}
+  .w{color:#d8ffe4;text-shadow:0 0 6px rgba(216,255,228,.6)}
+  .c{color:#5be3ff;text-shadow:0 0 5px rgba(91,227,255,.5)}
+  #meas{position:absolute;visibility:hidden;font:100px var(--mono);white-space:pre}
+  #cam{position:fixed;left:-9999px;top:0;width:640px;height:480px}
+  #scan{position:fixed;inset:0;pointer-events:none;
+        background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.25) 3px)}
+  #vig{position:fixed;inset:0;pointer-events:none;
+       background:radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(0,0,0,.7) 100%)}
+  @keyframes flick{0%,100%{opacity:1}47%{opacity:1}50%{opacity:.94}53%{opacity:1}}
+</style>
+</head>
+<body>
+<pre id="scr"></pre>
+<span id="meas">MMMMMMMMMMMMMMMMMMMM</span>
+<video id="cam" autoplay muted playsinline></video>
+<div id="scan"></div><div id="vig"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ============================================================
+   PANOPTICON RUNNER  —  retro terminal arcade with a dark twist
+   Controls:  RED   = Space / ArrowUp / W   (jump, next letter)
+              YELLOW = Enter / ArrowRight / X (dash+grab, select)
+   Operator:  F8 = export leaderboard CSV,  F9 twice = reset data,
+              Esc = abort back to the login screen
+   ============================================================ */
+
+const W = 88, H = 32, GY = 24, PX = 12, FW = 44, FH = 22, PLAY_T = 45;
+const $scr = document.getElementById('scr');
+const $meas = document.getElementById('meas');
+const vid = document.getElementById('cam');
+
+/* ---------- screen buffer ---------- */
+let ch = [], co = [];
+function clr() {
+  ch = []; co = [];
+  for (let y = 0; y < H; y++) { ch.push(new Array(W).fill(' ')); co.push(new Array(W).fill('g')); }
+}
+function put(x, y, s, c = 'g') {
+  s = String(s);
+  if (y < 0 || y >= H) return;
+  for (let i = 0; i < s.length; i++) {
+    const xx = x + i;
+    if (xx < 0 || xx >= W) continue;
+    ch[y][xx] = s[i]; co[y][xx] = c;
+  }
+}
+const center = (y, s, c) => put(Math.floor((W - String(s).length) / 2), y, s, c);
+const esc = t => t === '&' ? '&amp;' : t === '<' ? '&lt;' : t === '>' ? '&gt;' : t;
+function flush() {
+  let out = '';
+  for (let y = 0; y < H; y++) {
+    let run = '', cur = null;
+    for (let x = 0; x < W; x++) {
+      const c = co[y][x];
+      if (c !== cur) { if (cur !== null) out += '<span class="' + cur + '">' + run + '</span>'; cur = c; run = ''; }
+      run += esc(ch[y][x]);
+    }
+    out += '<span class="' + cur + '">' + run + '</span>\n';
+  }
+  $scr.innerHTML = out;
+}
+function fit() {
+  const r = ($meas.getBoundingClientRect().width / 20) / 100 || 0.6;
+  const fs = Math.floor(Math.min(innerWidth * 0.97 / (W * r), innerHeight * 0.97 / (H * 1.2)));
+  $scr.style.fontSize = Math.max(8, fs) + 'px';
+}
+addEventListener('resize', fit);
+
+/* ---------- helpers ---------- */
+const rnd = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const pad5 = n => String(Math.floor(n)).padStart(5, '0');
+function dots(label, val, width) {
+  val = String(val);
+  const n = width - label.length - val.length - 2;
+  return label + ' ' + '.'.repeat(Math.max(2, n)) + ' ' + val;
+}
+function wrap(text, width, indent = '') {
+  const words = text.split(' '), lines = [];
+  let cur = '';
+  for (const w of words) {
+    if ((cur + ' ' + w).trim().length > width) { lines.push(cur); cur = indent + w; }
+    else cur = (cur ? cur + ' ' : '') + w;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+function box(x, y, w, h, c) {
+  put(x, y, '+' + '-'.repeat(w - 2) + '+', c);
+  put(x, y + h - 1, '+' + '-'.repeat(w - 2) + '+', c);
+  for (let i = 1; i < h - 1; i++) { put(x, y + i, '|', c); put(x + w - 1, y + i, '|', c); }
+}
+function typed(x, y, text, startAt, c, speed = 70) {
+  const n = clamp(Math.floor((stT - startAt) * speed), 0, text.length);
+  if (n > 0) put(x, y, text.slice(0, n), c);
+  return n >= text.length;
+}
+
+/* ---------- storage ---------- */
+const LBK = 'panopticon_lb_v1', STK = 'panopticon_stats_v1';
+function load(k, def) { try { const v = JSON.parse(localStorage.getItem(k)); return v || def; } catch (e) { return def; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+let lb = load(LBK, []);
+let stats = Object.assign({ plays: 0, totalScore: 0, reactSum: 0, reactN: 0, grabbed: {} }, load(STK, {}));
+stats.grabbed = stats.grabbed || {};
+
+/* ---------- rewards (the bait) ---------- */
+const REW = [
+  { id: 'COFFEE',  label: 'FREE COFFEE COUPON', perm: 'LOCATION',         fact: 'A coffee coupon that asks for your location is really buying a map of your daily routine.' },
+  { id: 'VPN',     label: '100% FREE VPN',      perm: 'BROWSING HISTORY', fact: "Many 'free' VPN apps earn their money by logging and selling your browsing data." },
+  { id: 'LOAN',    label: 'INSTANT LOAN',       perm: 'CONTACTS+SMS',     fact: 'Illegal instant-loan apps have been reported scraping contacts and photos to shame borrowers.' },
+  { id: 'WIFI',    label: 'FREE WI-FI',         perm: 'DEVICE ID',        fact: 'Free Wi-Fi hotspots can log your device ID, and on open networks, a lot more than that.' },
+  { id: 'VOUCHER', label: 'DISCOUNT VOUCHER',   perm: 'PURCHASE HISTORY', fact: 'Discount vouchers are bait. The product being sold is your purchase history.' },
+  { id: 'COINS',   label: 'FREE COINS',         perm: 'MICROPHONE',       fact: "'Free coins' loops borrow slot-machine tricks: variable rewards, flashing lights, urgency." }
+];
+
+/* ---------- audio ---------- */
+let ac = null, master = null;
+function initAudio() {
+  if (ac) return;
+  try {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = 0.6; master.connect(ac.destination);
+  } catch (e) { ac = null; }
+}
+function tone(f, d = 0.1, type = 'square', v = 0.06, to = 0, when = 0) {
+  if (!ac) return;
+  const t = ac.currentTime + when, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  if (to > 0) o.frequency.exponentialRampToValueAtTime(to, t + d);
+  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + d + 0.02);
+}
+function noise(d = 0.5, v = 0.12) {
+  if (!ac) return;
+  const n = Math.floor(ac.sampleRate * d), b = ac.createBuffer(1, n, ac.sampleRate), data = b.getChannelData(0);
+  for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
+  const s = ac.createBufferSource(), g = ac.createGain();
+  s.buffer = b; g.gain.setValueAtTime(v, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + d);
+  s.connect(g); g.connect(master); s.start();
+}
+const sfx = {
+  blip:  () => tone(880, 0.04, 'square', 0.05),
+  jump:  () => tone(330, 0.13, 'square', 0.07, 700),
+  dash:  () => tone(220, 0.16, 'sawtooth', 0.05, 700),
+  grab:  () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.09, 'square', 0.06, 0, i * 0.045)),
+  crash: () => { noise(0.45, 0.2); tone(180, 0.45, 'sawtooth', 0.1, 40); },
+  beep:  () => tone(660, 0.1, 'square', 0.07),
+  go:    () => tone(1320, 0.3, 'square', 0.08),
+  glitch:() => { noise(1.6, 0.18); }
+};
+const MEL = [0,4,7,12,7,4, 2,5,9,14,9,5, 3,7,10,15,10,7, 4,7,11,16,11,7];
+const BAS = [0,-5,-3,-7];
+let musicStep = 0, musicTimer = null;
+function startMusic() {
+  stopMusic(); musicStep = 0;
+  musicTimer = setInterval(() => {
+    if (!ac) return;
+    const n = MEL[musicStep % MEL.length];
+    tone(261.63 * Math.pow(2, n / 12), 0.1, 'square', 0.03);
+    if (musicStep % 6 === 0) tone(65.4 * Math.pow(2, BAS[Math.floor(musicStep / 6) % 4] / 12), 0.35, 'triangle', 0.09);
+    musicStep++;
+  }, 115);
+}
+function stopMusic() { if (musicTimer) clearInterval(musicTimer); musicTimer = null; }
+
+/* ---------- sensor (webcam -> ASCII, nothing is ever stored) ---------- */
+let camState = 'pending';
+async function initCam() {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+    vid.srcObject = s; await vid.play(); camState = 'ok';
+  } catch (e) { camState = 'none'; }
+}
+const RAMP = ' .,:;-=+*xX#%@';
+function snapAscii() {
+  if (camState !== 'ok' || !vid.videoWidth) return null;
+  try {
+    const vw = vid.videoWidth, vh = vid.videoHeight, s = Math.min(vw, vh);
+    const S = 4, cw = FW * S, chh = FH * S;
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = chh;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.translate(cw, 0); cx.scale(-1, 1);                      // mirror, like a mirror
+    cx.drawImage(vid, (vw - s) / 2, (vh - s) / 2, s, s, 0, 0, cw, chh);
+    const d = cx.getImageData(0, 0, cw, chh).data;
+    const lum = new Float32Array(FW * FH);
+    for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+      let sum = 0;
+      for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+        const p = ((y * S + j) * cw + (x * S + i)) * 4;
+        sum += 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2];
+      }
+      lum[y * FW + x] = sum / (S * S);
+    }
+    const sorted = Array.from(lum).sort((a, b) => a - b);
+    const lo = sorted[Math.floor(sorted.length * 0.03)], hi = sorted[Math.floor(sorted.length * 0.97)];
+    const span = Math.max(20, hi - lo);
+    const rows = [];
+    for (let y = 0; y < FH; y++) {
+      let line = '';
+      for (let x = 0; x < FW; x++) {
+        const v = Math.pow(clamp((lum[y * FW + x] - lo) / span, 0, 1), 0.9);
+        line += RAMP[Math.floor(v * (RAMP.length - 1))];
+      }
+      rows.push(line);
+    }
+    cv.width = cv.height = 0;                                   // the pixels are gone; only text remains
+    return rows;
+  } catch (e) { return null; }
+}
+function placeholderFace() {
+  const rows = [];
+  for (let y = 0; y < FH; y++) {
+    let s = '';
+    for (let x = 0; x < FW; x++) {
+      const hx = (x - 22) / 13, hy = (y - 8) / 8.2, head = hx * hx + hy * hy;
+      const sx = (x - 22) / 21, sy = (y - 24) / 9, sh = sx * sx + sy * sy;
+      let c = ' ';
+      if (head < 1) c = head > 0.8 ? '#' : (Math.random() < 0.5 ? ':' : '.');
+      else if (sh < 1) c = sh > 0.8 ? '#' : (Math.random() < 0.5 ? '.' : ' ');
+      s += c;
+    }
+    rows.push(s);
+  }
+  return rows;
+}
+
+/* ---------- state ---------- */
+let state = 'boot', stT = 0;
+let name = '', kb = false, pick = 0;
+const PICK = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<>';
+let game = null, res = null, lastEntry = null, lastCh = null, lastCo = null;
+let dosLines = [], dosTotal = 0, resetArm = 0;
+
+function go(s) {
+  state = s; stT = 0;
+  if (s === 'name') { name = ''; kb = false; pick = 0; }
+  if (s === 'count') cntLast = 4;
+  if (s === 'play') { newGame(); startMusic(); }
+  if (s === 'glitch') sfx.glitch();
+  if (s === 'dos2') buildDos2();
+}
+let cntLast = 4;
+
+/* ---------- game ---------- */
+const sky = [];
+(function () {
+  const N = 300; let i = 0;
+  while (i < N) {
+    const w = 6 + Math.floor(Math.random() * 8), h = 3 + Math.floor(Math.random() * 9);
+    for (let k = 0; k < w && i < N; k++, i++) sky.push({ h, e: (k === 0 || k === w - 1) });
+  }
+})();
+const GRAV = 60, JV = 27;
+
+function newGame() {
+  game = {
+    t: 0, dist: 0, speed: 24, score: 0, rewards: 0, presses: 0, jumps: 0,
+    h: 0, vy: 0, onGround: true, dashT: 0, dashCD: 0,
+    obs: [], rew: [], next: 70, popups: [], log: '> sys: session started',
+    grabs: {}, reacts: [], over: false, cause: '', snap: null, snapTried: false, bag: []
+  };
+}
+function takeSnap() {
+  game.snapTried = true;
+  game.snap = snapAscii();
+}
+function spawn() {
+  const G = game;
+  const type = Math.random() < 0.45 ? 0 : 1;
+  G.obs.push(type === 0
+    ? { x: G.next, w: 5, h: 2, type, alert: null, reacted: false }
+    : { x: G.next, w: 3, h: 4, type, alert: null, reacted: false });
+  const gap = G.speed * rnd(1.0, 1.9) + 12;
+  if (Math.random() < 0.85) {
+    if (!G.bag.length) G.bag = REW.slice().sort(() => Math.random() - 0.5);
+    const def = G.bag.pop();
+    const txt = '[$ ' + def.label + ' $]';
+    const y = [1.5, 3.5, 5.5][Math.floor(Math.random() * 3)];
+    G.rew.push({ x: G.next + gap / 2 - txt.length / 2, y, txt, def, taken: false });
+  }
+  G.next += gap;
+}
+function doJump() {
+  const G = game;
+  if (!G.onGround) return;
+  G.onGround = false; G.vy = JV; G.jumps++; sfx.jump();
+  let best = null;
+  for (const o of G.obs) {
+    if (o.alert !== null && !o.reacted && (o.x - G.dist) > PX - 2) { if (!best || o.x < best.x) best = o; }
+  }
+  if (best) { best.reacted = true; G.reacts.push(clamp((G.t - best.alert) * 1000, 80, 900)); }
+}
+function doDash() {
+  const G = game;
+  G.presses++;
+  if (G.dashCD <= 0) { G.dashT = 0.32; G.dashCD = 0.85; sfx.dash(); }
+}
+function updatePlay(dt) {
+  const G = game;
+  if (G.over) return;
+  G.t += dt;
+  G.speed = 24 + (G.t / PLAY_T) * 16;
+  G.dist += G.speed * dt;
+  if (!G.onGround) {
+    G.vy -= GRAV * dt; G.h += G.vy * dt;
+    if (G.h <= 0) { G.h = 0; G.vy = 0; G.onGround = true; }
+  }
+  G.dashT = Math.max(0, G.dashT - dt);
+  G.dashCD = Math.max(0, G.dashCD - dt);
+  while (G.next < G.dist + W + 20) spawn();
+
+  const alertDist = 0.67 * G.speed + 3;
+  for (const o of G.obs) {
+    const sx = o.x - G.dist;
+    if (o.alert === null && sx <= PX + alertDist) o.alert = G.t;
+    if (G.dashT <= 0 && sx <= PX + 2 && sx + o.w - 1 >= PX + 1 && G.h < o.h - 0.3) {
+      G.log = '> sys: process terminated by ' + (o.type === 0 ? 'MALWARE' : 'FIREWALL');
+      endGame(o.type === 0 ? 'VIRUS' : 'FIREWALL'); return;
+    }
+  }
+  for (const r of G.rew) {
+    if (r.taken || G.dashT <= 0) continue;
+    const sx = r.x - G.dist;
+    if (sx <= PX + 3 + 4 && sx + r.txt.length >= PX - 1 && r.y >= G.h - 0.5 && r.y <= G.h + 3.0) {
+      r.taken = true; G.rewards++;
+      G.grabs[r.def.id] = (G.grabs[r.def.id] || 0) + 1;
+      G.popups.push({ x: PX + 2, y: G.h + 3, txt: '+250', t: 0 });
+      G.log = '> sys: reward claimed [' + r.def.label + ']  perm.granted: ' + r.def.perm.replace(/ /g, '_');
+      sfx.grab();
+    }
+  }
+  G.obs = G.obs.filter(o => o.x - G.dist > -10);
+  G.rew = G.rew.filter(r => r.x - G.dist > -30);
+  for (const p of G.popups) p.t += dt;
+  G.popups = G.popups.filter(p => p.t < 0.9);
+  G.score = Math.floor(G.dist * 2) + G.rewards * 250;
+  if (!G.snapTried && G.t > 10) takeSnap();
+  if (G.t >= PLAY_T) endGame(null);
+}
+
+function endGame(cause) {
+  const G = game;
+  if (G.over) return;
+  G.over = true; G.cause = cause; stopMusic();
+  if (cause) sfx.crash();
+  if (!G.snapTried) takeSnap();
+  const played = Math.min(G.t, PLAY_T);
+  const score = Math.floor(G.dist * 2) + G.rewards * 250 + (cause ? 0 : 1000);
+  const react = G.reacts.length ? Math.round(G.reacts.reduce((a, b) => a + b, 0) / G.reacts.length) : 0;
+  const pps = G.presses / Math.max(played, 1);
+  const imp = Math.min(100, Math.round(pps * 38 + G.rewards * 5));
+  const lvl = imp < 35 ? 'LOW' : imp < 65 ? 'MODERATE' : imp < 85 ? 'HIGH' : 'CRITICAL';
+  const phish = Math.min(99, Math.round(imp * 0.7 + (react ? Math.max(0, (450 - Math.min(react, 450)) / 450 * 30) : 15)));
+  const hasFace = !!G.snap;
+  const vClick = Math.round((8 + G.rewards * 3.25) * 100) / 100;
+  const vAttn = Math.round((6 + Math.min(G.presses, 40) * 0.35) * 100) / 100;
+  const vFace = hasFace ? 15 : 0;
+  const total = Math.round((vClick + vAttn + vFace) * 100) / 100;
+  res = { score, react, imp, lvl, phish, hasFace, vClick, vAttn, vFace, total, played,
+          presses: G.presses, rewards: G.rewards, grabs: Object.assign({}, G.grabs), cause,
+          face: G.snap || placeholderFace() };
+  // persist (name + numbers only; the image is never saved)
+  stats.plays++; stats.totalScore += score;
+  if (react) { stats.reactSum += react; stats.reactN++; }
+  for (const id in G.grabs) stats.grabbed[id] = (stats.grabbed[id] || 0) + 1;
+  save(STK, stats);
+  lastEntry = { name: name || 'ANON', score, rew: G.rewards, react, ts: Date.now() };
+  lb.push(lastEntry);
+  lb.sort((a, b) => b.score - a.score || a.ts - b.ts);
+  lb = lb.slice(0, 50);
+  save(LBK, lb);
+  lastCh = ch.map(r => r.slice()); lastCo = co.map(r => r.slice());
+  go('glitch');
+}
+
+/* ---------- screens ---------- */
+function drawBoard(x, y, n) {
+  put(x, y, 'RK  NAME        SCORE  REW', 'a');
+  put(x, y + 1, '-'.repeat(27), 'd');
+  for (let i = 0; i < n; i++) {
+    const e = lb[i], row = y + 2 + i;
+    if (!e) { put(x, row, String(i + 1).padStart(2) + '. ----------  -----   -', 'd'); continue; }
+    const hl = e === lastEntry && state === 'board';
+    const line = String(i + 1).padStart(2) + '. ' + e.name.padEnd(10) + '  ' + pad5(e.score) + '  x' + e.rew;
+    const blink = hl && Math.floor(performance.now() / 300) % 2;
+    put(x, row, line, hl ? (blink ? 'a' : 'w') : (i < 3 ? 'a' : 'g'));
+    if (hl) put(x + 29, row, '<< YOU', blink ? 'a' : 'w');
+  }
+}
+function drawBoot(now) {
+  const lines = [
+    ['PANOPTICON SYSTEMS (C) 1987-2026  ALL RIGHTS RESERVED', 'g'],
+    ['BIOS 2.04   MEMORY TEST ........ 640K OK', 'g'],
+    ['LOADING RUNNER.EXE ............. OK', 'g'],
+    ['AUDIO CHIP ..................... ' + (ac ? 'OK' : 'OK'), 'g'],
+    ['SENSOR BUS ..................... ' + (camState === 'ok' ? 'OK' : camState === 'none' ? 'NONE' : '...'), 'g'],
+    ['LEADERBOARD.DAT ................ ' + lb.length + ' RECORDS', 'g'],
+    ['', 'g'],
+    ['FREE TO PLAY. NO REGISTRATION. NO STRINGS ATTACHED.', 'a']
+  ];
+  const t0 = [0.2, 0.6, 1.1, 1.6, 2.1, 2.6, 2.6, 3.0];
+  for (let i = 0; i < lines.length; i++) typed(4, 4 + i, lines[i][0], t0[i], lines[i][1], 90);
+  if (stT > 3.8) {
+    put(4, 15, 'PRESS ANY BUTTON TO LOG IN' + (Math.floor(now / 500) % 2 ? '_' : ' '), 'w');
+  }
+  put(4, 28, 'v1.0  PAD: ' + (serialState === 'on' ? 'USB CONNECTED' : serialState === 'unsupported' ? 'USE CHROME FOR USB PAD' : 'press F7 to connect USB pad (or use keyboard: SPACE / ENTER)'), serialState === 'on' ? 'a' : 'd');
+}
+function drawName(now) {
+  put(3, 1, 'P A N O P T I C O N   R U N N E R', 'a');
+  put(3, 2, '-'.repeat(40), 'd');
+  put(3, 4, 'LOG IN TO BEGIN SESSION.', 'g');
+  put(3, 6, 'ENTER HANDLE (MAX 10):', 'g');
+  put(3, 8, '> ' + name + (Math.floor(now / 450) % 2 ? '_' : ' '), 'w');
+  const sym = PICK[pick];
+  const lab = sym === '<' ? 'DEL' : sym === '>' ? 'GO' : sym;
+  put(3, 10, 'SELECT:  ' + PICK[(pick + PICK.length - 1) % PICK.length].replace('<', '\u2190').replace('>', '\u2192') + '  ', 'd');
+  put(14, 10, '[ ' + lab + ' ]', 'a');
+  put(14 + 4 + lab.length + 1, 10, '  ' + PICK[(pick + 1) % PICK.length].replace('<', '\u2190').replace('>', '\u2192'), 'd');
+  put(3, 12, 'RED    next symbol', 'r');
+  put(3, 13, 'YELLOW pick it   (\u2190 delete, \u2192 start)', 'a');
+  put(3, 14, 'or type on keyboard, ENTER to start', 'd');
+  put(3, 17, 'HOW TO SURVIVE 45 SECONDS', 'a');
+  put(3, 18, '* RED    jumps over viruses & firewalls', 'g');
+  put(3, 19, '* YELLOW dashes and grabs FREE REWARDS', 'g');
+  put(3, 20, '* rewards = big score. enjoy.', 'g');
+  put(3, 21, '* no strings attached.', 'd');
+  put(47, 3, '== TOP RUNNERS ==', 'a');
+  drawBoard(47, 5, 10);
+  put(47, 19, dots('PLAYS', stats.plays, 27), 'd');
+  put(47, 20, dots('HIGH SCORE', lb[0] ? pad5(lb[0].score) : '-----', 27), 'd');
+  put(3, 29, 'OPERATOR: F7 USB pad | F8 CSV | F9 x2 reset | ESC abort', 'd');
+}
+function drawCount(now) {
+  put(3, 1, 'PANOPTICON RUNNER', 'a');
+  put(W - 3 - ('PLAYER: ' + name).length, 1, 'PLAYER: ' + name, 'g');
+  put(3, 2, '='.repeat(W - 6), 'd');
+  const n = 3 - Math.floor(stT);
+  const txt = n >= 1 ? String(n) : 'GO';
+  const DIG = {
+    '3': ['#####', '    #', ' ####', '    #', '#####'], '2': ['#####', '    #', '#####', '#    ', '#####'],
+    '1': ['  #  ', ' ##  ', '  #  ', '  #  ', ' ### '], 'G': [' ### ', '#    ', '# ###', '#   #', ' ### '],
+    'O': [' ### ', '#   #', '#   #', '#   #', ' ### ']
+  };
+  const w = txt.length * 6 - 1, x0 = Math.floor((W - w) / 2);
+  for (let r = 0; r < 5; r++) for (let i = 0; i < txt.length; i++) put(x0 + i * 6, 10 + r, DIG[txt[i]][r], 'a');
+  center(18, 'GET READY, ' + (name || 'ANON'), 'g');
+  center(20, 'RED = JUMP         YELLOW = DASH + GRAB', 'w');
+  center(21, 'grab the FREE stuff. it is free.', 'd');
+  if (n !== cntLast) { cntLast = n; n >= 1 ? sfx.beep() : sfx.go(); }
+}
+function drawPlay(now) {
+  const G = game;
+  put(1, 0, 'PANOPTICON RUNNER v1.0', 'a');
+  const pl = 'PLAYER: ' + (name || 'ANON'); put(W - 1 - pl.length, 0, pl, 'g');
+  put(1, 1, 'SCORE ' + pad5(G.score), 'w');
+  put(20, 1, 'TIME ' + Math.max(0, PLAY_T - G.t).toFixed(1).padStart(4, ' ') + 's', 'w');
+  put(36, 1, 'REWARDS x' + G.rewards, 'a');
+  put(54, 1, 'DASH ' + (G.dashCD <= 0 ? '[READY]' : '[.....]'), G.dashCD <= 0 ? 'a' : 'd');
+  const filled = Math.round(clamp(G.t / PLAY_T, 0, 1) * 40);
+  put(1, 2, '[' + '#'.repeat(filled) + '.'.repeat(40 - filled) + ']', 'd');
+  put(0, 3, '='.repeat(W), 'd');
+
+  const off = Math.floor(G.dist * 0.35);
+  for (let x = 0; x < W; x++) {
+    const i = (x + off) % sky.length, c = sky[i];
+    for (let r = 1; r <= c.h; r++) {
+      const row = GY - r; let t = ' ';
+      if (r === c.h) t = '_'; else if (c.e) t = '|'; else if (((i * 31 + r * 17) % 7) < 2) t = '.';
+      ch[row][x] = t; co[row][x] = 'd';
+    }
+  }
+  const gd = Math.floor(G.dist);
+  for (let x = 0; x < W; x++) {
+    ch[GY][x] = ((x + gd) % 8 === 0) ? '#' : '='; co[GY][x] = 'g';
+    ch[GY + 1][x] = ((x + gd) % 4 === 0) ? ':' : ' '; co[GY + 1][x] = 'd';
+    ch[GY + 2][x] = ((x + gd) % 11 === 0) ? '.' : ' '; co[GY + 2][x] = 'd';
+  }
+  for (const o of G.obs) {
+    const sx = Math.round(o.x - G.dist);
+    if (sx > W || sx + o.w < 0) continue;
+    if (o.type === 0) { put(sx, GY - 2, '{x^x}', 'r'); put(sx, GY - 1, '<###>', 'r'); }
+    else { put(sx, GY - 4, '^^^', 'a'); put(sx, GY - 3, '###', 'r'); put(sx, GY - 2, 'FW!', 'r'); put(sx, GY - 1, '###', 'r'); }
+  }
+  const blink = Math.floor(now / 140) % 2;
+  for (const r of G.rew) {
+    if (r.taken) continue;
+    const sx = Math.round(r.x - G.dist);
+    if (sx > W || sx + r.txt.length < 0) continue;
+    put(sx, Math.round(GY - 1 - r.y), r.txt, blink ? 'a' : 'w');
+  }
+  const feet = GY - 1 - Math.round(G.h);
+  const run = Math.floor(G.dist / 2) % 2;
+  let spr;
+  if (G.dashT > 0) spr = [' o-', '=|=', '=/\\'];
+  else if (!G.onGround) spr = ['\\o/', ' | ', '/ \\'];
+  else spr = run ? [' o ', '/|\\', '/ \\'] : [' o ', '/|\\', ' | '];
+  for (let i = 0; i < 3; i++) put(PX, feet - 2 + i, spr[i], G.dashT > 0 ? 'a' : 'w');
+  if (G.dashT > 0) { put(PX - 6, feet - 1, '~~~~~~', 'a'); put(PX - 5, feet, '~~~~', 'a'); }
+  for (const p of G.popups) put(p.x, Math.round(GY - 1 - p.y - p.t * 4), p.txt, 'a');
+  put(0, H - 5, '-'.repeat(W), 'd');
+  put(1, H - 4, G.log, 'd');
+  put(1, H - 2, '[RED/SPACE] JUMP      [YELLOW/ENTER] DASH + GRAB FREE STUFF', 'g');
+}
+function drawGlitch() {
+  const p = Math.min(1, stT / 1.3);
+  const glyphs = '#%@$&*?/\\|<>01';
+  const cols = ['g', 'r', 'd', 'a'];
+  for (let y = 0; y < H; y++) {
+    const sh = Math.random() < p * 0.5 ? Math.floor((Math.random() - 0.5) * 24 * p) : 0;
+    const blank = stT > 1.1 && Math.random() < (stT - 1.1) / 0.5;
+    for (let x = 0; x < W; x++) {
+      if (blank) { ch[y][x] = ' '; continue; }
+      ch[y][x] = lastCh[y][((x - sh) % W + W) % W]; co[y][x] = lastCo[y][((x - sh) % W + W) % W];
+      if (Math.random() < p * 0.35) { ch[y][x] = glyphs[Math.floor(Math.random() * glyphs.length)]; co[y][x] = cols[Math.floor(Math.random() * 4)]; }
+    }
+  }
+  if (stT > 0.5 && stT < 1.3) center(15, ' SIGNAL LOST ', 'r');
+  if (stT > 0.9 && stT < 1.5) center(17, ' ACQUIRING TARGET... ', 'r');
+}
+function subj() { return 400 + stats.plays; }
+function drawDos1(now) {
+  put(1, 0, '*** DARK WEB DATA BROKER // DOSSIER GENERATOR v3.1 ***', 'r');
+  put(0, 1, '='.repeat(W), 'r');
+  typed(1, 3, 'PROFILE GENERATED: SUBJECT #' + subj() + ' (VIT-AP VISITOR)', 0.2, 'a', 60);
+  box(1, 4, FW + 2, FH + 2, 'd');
+  const n = clamp(Math.floor((stT - 0.5) / 0.07), 0, FH);
+  for (let y = 0; y < n; y++) put(2, 5 + y, res.face[y], 'g');
+  if (n < FH && stT > 0.5) put(2, 5 + n, '~'.repeat(FW), 'r');
+  if (n >= FH) {
+    for (let yy = 0; yy < FH; yy += 4) for (let xx = 0; xx < FW; xx += 8) put(2 + xx, 5 + yy, '+', 'r');
+    const bx0 = 2 + 9, bx1 = 2 + 35, by0 = 5 + 2, by1 = 5 + 17;
+    put(bx0, by0, '+' + '-'.repeat(bx1 - bx0 - 1) + '+', 'r');
+    put(bx0, by1, '+' + '-'.repeat(bx1 - bx0 - 1) + '+', 'r');
+    for (let y = by0 + 1; y < by1; y++) { put(bx0, y, '|', 'r'); put(bx1, y, '|', 'r'); }
+    put(bx0 + 2, by0, res.hasFace ? '[FACE 1] ' + (Math.floor(now / 90) % 2 ? '99.2%' : '98.7%') : '[NO IMAGE]', 'r');
+  }
+  const conf = res.hasFace ? '98.7%' : 'N/A';
+  const info = [
+    ['FACIAL RECOGNITION', 'ACTIVE'], ['MATCH CONFIDENCE', conf], ['ALIAS', name || 'ANON'],
+    ['ORIGIN', 'VIT-AP CAMPUS'], ['CAPTURED', 'CANDID, MID-GAME'], ['DEVICE', 'UNKNOWN'], ['STATUS', 'TRACKED']
+  ];
+  for (let i = 0; i < info.length; i++) typed(49, 5 + i * 2, dots(info[i][0], info[i][1], 38), 1.0 + i * 0.45, i === 6 ? 'r' : 'g', 80);
+  if (stT > 4.2) {
+    put(49, 20, 'COMPILING BEHAVIORAL PROFILE', 'a');
+    const f = Math.round(clamp((stT - 4.2) / 4.0, 0, 1) * 30);
+    put(49, 21, '[' + '#'.repeat(f) + '.'.repeat(30 - f) + '] ' + Math.round(f / 30 * 100) + '%', 'a');
+  }
+  if (!res.hasFace && n >= FH) put(2, 28, 'NO SENSOR FEED - SUBJECT MASKED', 'd');
+  if (stT > 2.5) put(1, 30, '> PRESS ANY BUTTON TO CONTINUE' + (Math.floor(now / 500) % 2 ? '_' : ' '), 'w');
+}
+function buildDos2() {
+  const R = res, L = [];
+  const add = (segs, gap = 0) => L.push({ segs, gap });
+  const levelBar = '[' + '#'.repeat(Math.round(R.imp / 10)) + '-'.repeat(10 - Math.round(R.imp / 10)) + ']';
+  const permCount = {};
+  for (const id in R.grabs) { const d = REW.find(r => r.id === id); permCount[d.perm] = (permCount[d.perm] || 0) + R.grabs[id]; }
+  const perms = Object.entries(permCount).sort((a, b) => b[1] - a[1]);
+  let permTxt = perms.length ? perms.slice(0, 3).map(p => p[0] + ' x' + p[1]).join(', ') + (perms.length > 3 ? ' +' + (perms.length - 3) + ' MORE' : '') : 'NONE (THIS TIME)';
+  add([['BEHAVIORAL PROFILE // SUBJECT #' + subj() + ' // ' + (name || 'ANON'), 'r']]);
+  add([[dots('REACTION SPEED', R.react ? R.react + ' ms' : 'NO DATA', 84), 'g']]);
+  add([[dots('IMPULSIVITY SCORE', levelBar + ' ' + R.lvl, 84), R.imp >= 65 ? 'a' : 'g']]);
+  add([[dots('YELLOW PRESSES', R.presses + '   (REWARDS GRABBED: ' + R.rewards + ')', 84), 'g']]);
+  add([[dots('PHISHING SUSCEPTIBILITY', R.phish + '%', 84), R.phish >= 65 ? 'a' : 'g']]);
+  add([[dots('PERMISSIONS YOU GAVE AWAY', permTxt, 84), 'g']]);
+  add([['FINDINGS:', 'a']], 1);
+  // finding 1
+  const f1 = R.rewards
+    ? 'You pressed YELLOW ' + R.presses + ' times chasing "free" rewards, and did not check a single permission.'
+    : 'You touched YELLOW ' + R.presses + ' times but grabbed nothing. Still, the game logged every click, pause and hesitation.';
+  // finding 2
+  let top = null;
+  for (const id in R.grabs) if (!top || R.grabs[id] > R.grabs[top]) top = id;
+  const f2 = top ? REW.find(r => r.id === top).fact : 'Careful players are rare. But trackers do not need your clicks, only your attention.';
+  // finding 3
+  const f3 = 'Reaction speed: ' + (R.react ? R.react + 'ms' : 'unmeasured') + '. Impulsivity: ' + R.lvl + '. ' +
+    (R.imp >= 65 ? 'Prime target for UPI phishing links.' : 'Harder target, but phishing only needs one tired click.');
+  for (const f of [f1, f2, f3]) wrap('> ' + f, 82, '  ').forEach(line => add([[line, 'g']]));
+  add([['----------------------------- SESSION RECEIPT -----------------------------', 'a']], 1);
+  add([[dots('CLICK-THROUGH BEHAVIOR', '\u20B9' + R.vClick.toFixed(2), 60), 'g']]);
+  add([[dots('REACTION + ATTENTION DATA', '\u20B9' + R.vAttn.toFixed(2), 60), 'g']]);
+  if (R.hasFace) add([[dots('FACE (1x CANDID SNAPSHOT)', '\u20B9' + R.vFace.toFixed(2), 60), 'g']]);
+  add([[dots('TOTAL MARKET VALUE', '\u20B9' + R.total.toFixed(2), 60), 'r']]);
+  wrap('Your behavioral profile is worth \u20B9' + R.total.toFixed(2) + ' to ad networks. Thank you for playing for free.', 84)
+    .forEach((line, i) => add([[line, 'w']], i === 0 ? 1 : 0));
+  wrap('[DEBRIEF] This was a demo. Nothing was saved or sent anywhere. Your photo was turned into text and thrown away. Real data brokers do not do that.', 84)
+    .forEach((line, i) => add([[line, 'a']], i === 0 ? 1 : 0));
+  let t = 0.3;
+  for (const l of L) { l.len = l.segs.reduce((a, s) => a + s[0].length, 0); l.at = t; t += l.len / 150 + 0.12; }
+  dosLines = L; dosTotal = t + 0.3;
+}
+function drawDos2(now) {
+  put(1, 0, '*** DARK WEB DATA BROKER // DOSSIER GENERATOR v3.1 ***', 'r');
+  put(0, 1, '='.repeat(W), 'r');
+  let y = 3;
+  for (const l of dosLines) {
+    y += l.gap;
+    const n = clamp(Math.floor((stT - l.at) * 150), 0, l.len);
+    if (n > 0) {
+      let x = 2, left = n;
+      for (const [s, c] of l.segs) { const part = s.slice(0, left); put(x, y, part, c); x += part.length; left -= part.length; if (left <= 0) break; }
+    }
+    y++;
+  }
+  if (stT > dosTotal) put(1, 30, '> PRESS ANY BUTTON FOR THE HALL OF FAME' + (Math.floor(now / 500) % 2 ? '_' : ' '), 'w');
+}
+function drawFinalBoard(now) {
+  put(3, 1, 'H A L L   O F   F A M E', 'a');
+  put(3, 2, '='.repeat(W - 6), 'd');
+  const rank = lb.indexOf(lastEntry) + 1;
+  put(3, 4, (name || 'ANON') + '  SCORE ' + pad5(res.score) + '  RANK #' + rank + '/' + lb.length, 'w');
+  drawBoard(3, 6, 10);
+  put(47, 4, 'SESSION METRICS', 'a');
+  put(47, 6, dots('TOTAL PLAYS', stats.plays, 38), 'g');
+  put(47, 7, dots('HIGH SCORE', lb[0] ? pad5(lb[0].score) : '-----', 38), 'g');
+  put(47, 8, dots('AVERAGE SCORE', stats.plays ? pad5(stats.totalScore / stats.plays) : '-----', 38), 'g');
+  put(47, 9, dots('AVG REACTION', stats.reactN ? Math.round(stats.reactSum / stats.reactN) + ' ms' : 'NO DATA', 38), 'g');
+  put(47, 11, 'VISITORS WHO FELL FOR:', 'a');
+  REW.forEach((r, i) => {
+    const pct = stats.plays ? Math.round((stats.grabbed[r.id] || 0) / stats.plays * 100) : 0;
+    const f = Math.round(pct / 10);
+    put(47, 12 + i, r.label.padEnd(19) + '[' + '#'.repeat(f) + '.'.repeat(10 - f) + '] ' + String(pct).padStart(3) + '%', 'g');
+  });
+  put(3, 22, 'THE LESSON: the free thing was never free.', 'w');
+  put(3, 23, 'Read permissions. Question free. Stay unprofiled.', 'g');
+  if (stT > 1) put(3, 28, '> PRESS ANY BUTTON FOR NEXT PLAYER' + (Math.floor(now / 500) % 2 ? '_' : ' '), 'w');
+}
+
+/* ---------- input ---------- */
+function startFromName() { if (!name) name = 'ANON'; sfx.go(); go('count'); }
+function onKey(e, blue, yellow) {
+  if (e.key === 'Escape') { stopMusic(); go('name'); return; }
+  switch (state) {
+    case 'boot':
+      if (stT > 0.6) { sfx.blip(); go('name'); }
+      break;
+    case 'name': {
+      if (e.key === 'Backspace') { name = name.slice(0, -1); sfx.blip(); return; }
+      if (e.key.length === 1 && /[A-Za-z0-9_.\-]/.test(e.key)) {
+        if (name.length < 10) { name += e.key.toUpperCase(); kb = true; sfx.blip(); }
+        return;
+      }
+      if (blue) { pick = (pick + 1) % PICK.length; sfx.blip(); return; }
+      if (e.key === 'ArrowLeft') { pick = (pick + PICK.length - 1) % PICK.length; sfx.blip(); return; }
+      if (yellow && !e.repeat) {
+        if (kb) { startFromName(); return; }
+        const s = PICK[pick];
+        if (s === '>') startFromName();
+        else if (s === '<') { name = name.slice(0, -1); sfx.blip(); }
+        else if (name.length < 10) { name += s; sfx.blip(); }
+      }
+      break;
+    }
+    case 'play':
+      if (e.repeat) return;
+      if (blue) doJump();
+      else if (yellow) doDash();
+      break;
+    case 'dos1':
+      if (stT > 2.5) go('dos2');
+      break;
+    case 'dos2':
+      if (stT < dosTotal) stT = dosTotal; else go('board');
+      break;
+    case 'board':
+      if (stT > 1) go('name');
+      break;
+  }
+}
+let serialState = 'off';
+async function connectSerial() {
+  if (!('serial' in navigator)) { serialState = 'unsupported'; return; }
+  try {
+    const port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    serialState = 'on';
+    const dec = new TextDecoderStream();
+    port.readable.pipeTo(dec.writable).catch(() => {});
+    const rd = dec.readable.getReader();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await rd.read();
+      if (done) break;
+      buf += value;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        const fake = k => handleKey({ key: k, repeat: false, preventDefault() {} });
+        if (l === 'B') fake(' '); else if (l === 'Y') fake('Enter');
+      }
+    }
+    serialState = 'off';
+  } catch (e) { serialState = 'off'; }
+}
+function handleKey(e) {
+  if (e.key === 'F7') { e.preventDefault(); initAudio(); connectSerial(); return; }
+  if (e.key === 'F8') { e.preventDefault(); exportCSV(); return; }
+  if (e.key === 'F9') {
+    e.preventDefault();
+    const now = performance.now();
+    if (now - resetArm < 3000) { lb = []; stats = { plays: 0, totalScore: 0, reactSum: 0, reactN: 0, grabbed: {} }; save(LBK, lb); save(STK, stats); resetArm = 0; }
+    else resetArm = now;
+    return;
+  }
+  if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key)) e.preventDefault();
+  initAudio();
+  const blue = [' ', 'ArrowUp', 'w', 'W'].includes(e.key);
+  const yellow = ['Enter', 'ArrowRight', 'x', 'X'].includes(e.key);
+  onKey(e, blue, yellow);
+}
+addEventListener('keydown', handleKey);
+function exportCSV() {
+  const rows = ['rank,name,score,rewards,reaction_ms,timestamp'];
+  lb.forEach((e, i) => rows.push([i + 1, e.name, e.score, e.rew, e.react, new Date(e.ts).toISOString()].join(',')));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' }));
+  a.download = 'panopticon_leaderboard.csv'; a.click();
+}
+
+/* ---------- main loop ---------- */
+let last = 0, lastR = 0;
+function frame(ts) {
+  const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts;
+  stT += dt;
+  if (state === 'count' && stT >= 4) go('play');
+  else if (state === 'play') updatePlay(dt);
+  else if (state === 'glitch' && stT > 1.6) go('dos1');
+  else if (state === 'dos1' && stT > 9) go('dos2');
+  else if (state === 'board' && stT > 30) go('name');
+  clr();
+  switch (state) {
+    case 'boot': drawBoot(ts); break;
+    case 'name': drawName(ts); break;
+    case 'count': drawCount(ts); break;
+    case 'play': if (state === 'play') drawPlay(ts); break;
+    case 'glitch': drawGlitch(); break;
+    case 'dos1': drawDos1(ts); break;
+    case 'dos2': drawDos2(ts); break;
+    case 'board': drawFinalBoard(ts); break;
+  }
+  if (ts - lastR >= 30) { flush(); lastR = ts; }
+  requestAnimationFrame(frame);
+}
+fit(); initCam();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

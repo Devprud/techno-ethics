@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TECHNO-ETHICS: VIRTUAL EXPERIENCE CENTRE</title>
+<meta name="description" content="Virtual experience centre for our Techno-Ethics exhibition: digital surveillance, data privacy and cybersecurity.">
+<meta name="theme-color" content="#090d16">
+
+<!-- Retro terminal font. If the network is offline the page falls back to Courier New. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+
+<style>
+/* =====================================================================
+   TECHNO-ETHICS : VIRTUAL EXPERIENCE CENTRE
+   Single-file site. Sections: CSS -> HTML -> JS.
+   Search for "EDIT:" to find every place you are meant to change.
+   ===================================================================== */
+
+/* ---------- 1. THEME TOKENS (change colours here) ---------- */
+:root{
+  --bg:    #090d16;            /* page background (try #000000 for pure black) */
+  --panel: #0c1220;            /* window body background */
+  --green: #22c55e;            /* phosphor green */
+  --cyan:  #38bdf8;            /* cyber cyan */
+  --dim:   #15803d;            /* dim green for borders and filler */
+  --red:   #f87171;            /* warnings */
+  --amber: #fbbf24;            /* highlights */
+  --mono:  "VT323", "Courier New", Courier, monospace;
+}
+
+/* ---------- 2. BASE ---------- */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:64px}
+body{
+  margin:0;background:var(--bg);color:var(--green);
+  font-family:var(--mono);font-size:20px;line-height:1.35;
+  text-shadow:0 0 6px rgba(34,197,94,.40);   /* phosphor glow */
+  animation:flicker 6s infinite;
+}
+a{color:var(--cyan);text-decoration:none;text-shadow:0 0 6px rgba(56,189,248,.5)}
+a:hover,a:focus-visible{background:var(--cyan);color:var(--bg);text-shadow:none;outline:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;text-shadow:inherit}
+:focus-visible{outline:2px dashed var(--amber);outline-offset:3px}
+::selection{background:var(--green);color:var(--bg)}
+h1,h2,h3,p{margin:0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.cyan{color:var(--cyan);text-shadow:0 0 6px rgba(56,189,248,.5)}
+.dim{color:var(--dim);text-shadow:none}
+.amber{color:var(--amber);text-shadow:0 0 6px rgba(251,191,36,.45)}
+.red{color:var(--red);text-shadow:0 0 6px rgba(248,113,113,.5)}
+.cursor{display:inline-block;width:.6em;height:1em;background:var(--green);vertical-align:text-bottom;
+  box-shadow:0 0 8px var(--green);animation:blink 1s steps(1) infinite}
+
+/* ---------- 3. CRT EFFECTS (scanlines + vignette) ---------- */
+body::before{               /* scanlines */
+  content:"";position:fixed;inset:0;z-index:9998;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.28) 3px);
+}
+body::after{                /* darkened screen corners */
+  content:"";position:fixed;inset:0;z-index:9997;pointer-events:none;
+  background:radial-gradient(ellipse at center,rgba(0,0,0,0) 60%,rgba(0,0,0,.55) 100%);
+}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes flicker{0%,100%{opacity:1}92%{opacity:1}93%{opacity:.93}94%{opacity:1}97%{opacity:.96}}
+@media (prefers-reduced-motion:reduce){
+  body{animation:none}.cursor{animation:none}html{scroll-behavior:auto}
+}
+
+/* ---------- 4. TOP TERMINAL NAV ---------- */
+.nav{
+  position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:1rem;
+  background:rgba(9,13,22,.96);border-bottom:2px solid var(--green);padding:.35rem 1rem;
+  box-shadow:0 2px 14px rgba(34,197,94,.25);
+}
+.nav .prompt{white-space:nowrap;color:var(--cyan)}
+.nav ul{list-style:none;margin:0;padding:0;display:flex;gap:.25rem 1rem;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+.nav ul::-webkit-scrollbar{display:none}
+.nav a{display:block;padding:0 .3rem;color:var(--green);text-shadow:inherit}
+.nav a:hover,.nav a:focus-visible,.nav a.active{background:var(--green);color:var(--bg);text-shadow:none}
+@media (max-width:760px){.nav .prompt{display:none}}
+
+/* ---------- 5. LAYOUT + TERMINAL WINDOWS ---------- */
+.wrap{max-width:1120px;margin:0 auto;padding:0 1rem 3rem}
+section{margin-top:2.5rem}
+.win{border:2px solid var(--green);background:var(--panel);box-shadow:0 0 18px rgba(34,197,94,.22),inset 0 0 30px rgba(34,197,94,.05)}
+.win-bar{display:flex;align-items:center;gap:.5rem;background:var(--green);color:var(--bg);padding:.1rem .6rem;text-shadow:none}
+.win-bar h2{font-size:inherit;font-weight:normal;white-space:nowrap}
+.win-bar .fill{flex:1;min-width:0;overflow:hidden;white-space:nowrap;opacity:.5}
+.win-bar .ctl{white-space:nowrap}
+.win-body{padding:1rem}
+.lead{margin-bottom:1rem;max-width:80ch}
+.lead::before{content:"> ";color:var(--cyan)}
+.hr{overflow:hidden;white-space:nowrap;color:var(--dim);text-shadow:none;margin:.75rem 0}
+
+/* ---------- 6. HEADER / BOOT ---------- */
+.banner-win{margin-top:1.5rem}
+.banner{
+  margin:0;overflow-x:auto;line-height:1.05;color:var(--green);
+  font-size:clamp(10px,3.4vw,40px);text-shadow:0 0 10px rgba(34,197,94,.7);
+}
+.banner.b2{color:var(--cyan);text-shadow:0 0 10px rgba(56,189,248,.7)}
+.sub-title{margin:.75rem 0 .25rem;letter-spacing:.15em;color:var(--cyan)}
+#boot{margin:.75rem 0 0;min-height:7.2em;white-space:pre-wrap;color:var(--dim);text-shadow:none}
+#boot b{color:var(--green);font-weight:normal;text-shadow:0 0 6px rgba(34,197,94,.4)}
+.status{border:1px dashed var(--dim);padding:.6rem .9rem;margin-top:.75rem}
+.status .k{color:var(--amber)}
+
+/* ---------- 7. GALLERIES (photos + posters) ---------- */
+.grid{display:grid;gap:1.1rem;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.grid.posters{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.frame{margin:0;border:1px solid var(--dim);background:#05080f}
+.frame .zoom{display:block;width:100%;position:relative;aspect-ratio:4/3;overflow:hidden;background:#05080f}
+.posters .frame .zoom img{object-fit:contain}   /* posters are shown whole, never cropped */
+.frame .zoom img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(.85) contrast(1.05)}
+.frame .zoom::after{            /* green phosphor tint over images */
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(rgba(34,197,94,.08),rgba(56,189,248,.06));mix-blend-mode:screen}
+.frame .zoom:hover img,.frame .zoom:focus-visible img{filter:none}
+.frame .zoom:hover::before{content:"[ CLICK TO ENLARGE ]";position:absolute;right:.4rem;bottom:.4rem;z-index:2;
+  background:var(--bg);color:var(--amber);padding:0 .4rem;border:1px solid var(--amber)}
+.frame figcaption{padding:.4rem .6rem;border-top:1px solid var(--dim);color:var(--green)}
+.frame figcaption .id{color:var(--cyan)}
+/* Shown automatically when an image file is missing */
+.ph{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:.8rem;color:var(--dim);text-shadow:none;background:repeating-linear-gradient(45deg,#070b14 0 8px,#09101c 8px 16px)}
+.missing img{display:none}
+.missing .ph{display:flex}
+.ph .big{color:var(--amber);font-size:1.3em}
+.ph .path{color:var(--cyan);word-break:break-all}
+.missing{cursor:default}
+.missing::after,.missing:hover::before{display:none!important}
+
+/* ---------- 8. IMAGE VIEWER (click-to-enlarge modal) ---------- */
+.viewer{position:fixed;inset:0;z-index:9990;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:1rem}
+.viewer[hidden]{display:none}
+.viewer .win{width:min(1000px,100%);max-height:100%;display:flex;flex-direction:column}
+.viewer .win-bar button{color:var(--bg);padding:0 .3rem}
+.viewer .win-bar button:hover{background:var(--bg);color:var(--green)}
+.v-stage{display:flex;align-items:center;gap:.5rem;padding:.6rem;min-height:0;flex:1}
+.v-stage img{flex:1;min-width:0;max-height:72vh;object-fit:contain;display:block;margin:0 auto;background:#000}
+.v-nav{font-size:1.6em;color:var(--cyan);padding:.5rem .3rem}
+.v-nav:hover:not(:disabled){background:var(--cyan);color:var(--bg)}
+.v-nav:disabled{color:var(--dim);cursor:default}
+.v-cap{padding:.4rem .8rem .7rem;border-top:1px dashed var(--dim)}
+
+/* ---------- 9. PDF VIEWER ---------- */
+.pdf-frame{width:100%;height:72vh;min-height:460px;border:1px solid var(--dim);background:#fff;display:block}
+.toolbar{display:flex;flex-wrap:wrap;gap:.5rem 1.2rem;margin-top:.8rem}
+
+/* ---------- 10. INTERACTIVE LAB LAUNCHER ---------- */
+.labs{display:grid;gap:1.1rem;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.lab{border:1px solid var(--dim);padding:.8rem 1rem;display:flex;flex-direction:column;gap:.5rem}
+.lab h3{font-size:1.15em;font-weight:normal;color:var(--cyan)}
+.lab dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:0 .8rem}
+.lab dt{color:var(--amber)}
+.lab dd{margin:0}
+.btn{display:inline-block;align-self:flex-start;border:2px solid var(--green);color:var(--green);padding:.1rem .9rem;text-shadow:inherit;margin-top:.3rem}
+.btn:hover,.btn:focus-visible{background:var(--green);color:var(--bg);text-shadow:none}
+.deny{margin-top:1.1rem;border:2px solid var(--red);background:#1a0c0f;color:var(--red);padding:.8rem 1rem;text-shadow:0 0 6px rgba(248,113,113,.5);
+  box-shadow:0 0 16px rgba(248,113,113,.3)}
+.deny[hidden]{display:none}
+.deny .head{font-size:1.2em;letter-spacing:.04em;margin-bottom:.3rem;animation:blink 1.2s steps(1) 3}
+.deny button{margin-top:.5rem;border:1px solid var(--red);padding:0 .7rem}
+.deny button:hover{background:var(--red);color:var(--bg);text-shadow:none}
+
+/* ---------- 11. CREDITS ---------- */
+.members{display:grid;gap:1.1rem;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.member{border:1px solid var(--dim);padding:.7rem 1rem}
+.member h3{font-size:1.15em;font-weight:normal;color:var(--cyan);overflow-wrap:anywhere}
+.member dl{margin:.3rem 0 0;display:grid;grid-template-columns:auto 1fr;gap:0 .8rem}
+.member dt{color:var(--amber);white-space:nowrap}
+.member dd{margin:0}
+.dir{margin:0 0 1rem;color:var(--dim);text-shadow:none;white-space:pre-wrap}
+.dir b{color:var(--green);font-weight:normal}
+
+/* ---------- 12. FOOTER ---------- */
+footer{margin-top:3rem;border-top:2px solid var(--green);padding-top:1rem;text-align:left}
+
+@media (max-width:560px){
+  body{font-size:18px}
+  .win-bar .ctl{display:none}
+  .lab dl,.member dl{grid-template-columns:1fr}
+  .lab dt,.member dt{margin-top:.25rem}
+}
+</style>
+</head>
+
+<body>
+
+<!-- =================== TOP TERMINAL NAV =================== -->
+<nav class="nav" aria-label="Main">
+  <span class="prompt">C:\TECHNO-ETHICS&gt;</span>
+  <ul>
+    <li><a href="#photos">[01_EXHIBIT_PHOTOS]</a></li>
+    <li><a href="#posters">[02_POSTERS]</a></li>
+    <li><a href="#presentation">[03_PRESENTATION]</a></li>
+    <li><a href="#labs">[04_INTERACTIVE_LABS]</a></li>
+    <li><a href="#credits">[05_TEAM_CREDITS]</a></li>
+  </ul>
+</nav>
+
+<main class="wrap">
+
+<!-- =================== HEADER / BOOT SEQUENCE =================== -->
+<header class="win banner-win" id="top">
+  <div class="win-bar">
+    <h2>SYSTEM_BOOT.EXE</h2><span class="fill" data-fill="="></span><span class="ctl">[_][#][X]</span>
+  </div>
+  <div class="win-body">
+    <!-- ASCII banner (aria-label gives screen readers the real title) -->
+    <h1 class="sr">TECHNO-ETHICS: Virtual Experience Centre</h1>
+<pre class="banner b1" aria-hidden="true">##### #####  #### #   # #   #  ###       
+  #   #     #     #   # ##  # #   #      
+  #   ####  #     ##### # # # #   #  ### 
+  #   #     #     #   # #  ## #   #      
+  #   #####  #### #   # #   #  ###       </pre>
+<pre class="banner b2" aria-hidden="true">##### ##### #   # #####  ####  ####
+#       #   #   #   #   #     #    
+####    #   #####   #   #      ### 
+#       #   #   #   #   #         #
+#####   #   #   # #####  #### #### </pre>
+    <p class="sub-title">+--[ VIRTUAL EXPERIENCE CENTRE ]--+</p>
+
+    <!-- Typed boot lines (filled by JS; purely decorative) -->
+    <pre id="boot" aria-hidden="true"></pre>
+
+    <!-- EDIT: system status / exhibition summary -->
+    <div class="status">
+      <span class="k">SYSTEM STATUS:</span> <span>ONLINE</span><br>
+      <span class="k">FOCUS:</span> digital surveillance, data privacy and cybersecurity.<br>
+      <span class="k">MISSION:</span> to show how the "free" apps, offers and networks we use every day quietly watch, profile and sell us,
+      and what we can do to take control back.<br>
+      <span class="k">INSTRUCTIONS:</span> use the menu above to browse the stall, read the posters, flip through our slides,
+      and try the interactive labs on a laptop.
+    </div>
+  </div>
+</header>
+
+
+<!-- =================== 01 EXHIBIT PHOTOS =================== -->
+<section id="photos" aria-labelledby="h-photos">
+  <div class="win">
+    <div class="win-bar">
+      <h2 id="h-photos">[01] EXHIBIT_PHOTOS.DIR</h2><span class="fill" data-fill="-"></span><span class="ctl">[_][#][X]</span>
+    </div>
+    <div class="win-body">
+      <p class="lead">Photos from our physical stall. Click any frame to enlarge.</p>
+      <div class="grid" data-gallery="photos">
+
+        <!--
+          EDIT: PHOTOS. To add or remove a photo, copy / delete one whole <figure> block.
+          - Replace src="./images/photoN.jpg" with your file path (put files in an /images folder).
+          - Update alt (for screen readers) and the caption text.
+          TIP: resize photos to ~1600px wide before uploading so the page loads fast on phones.
+        -->
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/photo1.jpg" alt="Exhibit stall overview" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/photo1.jpg</span></span>
+          </button>
+          <figcaption><span class="id">IMG_001.JPG</span> :: Stall overview (EDIT caption)</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/photo2.jpg" alt="Visitors playing Panopticon Runner" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/photo2.jpg</span></span>
+          </button>
+          <figcaption><span class="id">IMG_002.JPG</span> :: Visitors at the Panopticon Runner arcade</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/photo3.jpg" alt="Team explaining data privacy to visitors" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/photo3.jpg</span></span>
+          </button>
+          <figcaption><span class="id">IMG_003.JPG</span> :: Explaining data privacy to visitors</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/photo4.jpg" alt="Surveillance dossier screen" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/photo4.jpg</span></span>
+          </button>
+          <figcaption><span class="id">IMG_004.JPG</span> :: The "data broker dossier" reveal</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/photo5.jpg" alt="Leaderboard screen" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/photo5.jpg</span></span>
+          </button>
+          <figcaption><span class="id">IMG_005.JPG</span> :: Leaderboard and live visitor stats</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/photo6.jpg" alt="The team at the stall" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/photo6.jpg</span></span>
+          </button>
+          <figcaption><span class="id">IMG_006.JPG</span> :: Team photo</figcaption>
+        </figure>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- =================== 02 POSTERS & TITLE BOARD =================== -->
+<section id="posters" aria-labelledby="h-posters">
+  <div class="win">
+    <div class="win-bar">
+      <h2 id="h-posters">[02] POSTERS.VIEW</h2><span class="fill" data-fill="-"></span><span class="ctl">[_][#][X]</span>
+    </div>
+    <div class="win-body">
+      <p class="lead">Our awareness posters. Click to open the full-size viewer.</p>
+      <div class="grid posters" data-gallery="posters">
+
+        <!--
+          EDIT: POSTERS. Files live in ./images/poster1.jpg ... poster5.jpg. Change captions freely.
+          To add your TITLE BOARD, copy a <figure> block, point it to your file, and put it first.
+        -->
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/poster1.jpg" alt="Poster: a giant CCTV camera looming over a crowd" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/poster1.jpg</span></span>
+          </button>
+          <figcaption><span class="id">POSTER_01.JPG</span> :: Surveillance: always watching</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/poster2.jpg" alt="Poster: a hand reaching out of a laptop taking money" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/poster2.jpg</span></span>
+          </button>
+          <figcaption><span class="id">POSTER_02.JPG</span> :: Your data is the product</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/poster3.jpg" alt="Poster: a handshake through a laptop screen with money and a clock" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/poster3.jpg</span></span>
+          </button>
+          <figcaption><span class="id">POSTER_03.JPG</span> :: The data trade: privacy for profit</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/poster4.jpg" alt="Poster: The Human Firewall, internet privacy and data protection" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/poster4.jpg</span></span>
+          </button>
+          <figcaption><span class="id">POSTER_04.JPG</span> :: The Human Firewall: internet privacy and data protection</figcaption>
+        </figure>
+
+        <figure class="frame">
+          <button class="zoom" type="button" data-zoom>
+            <img src="./images/poster5.jpg" alt="Poster: think before you click Allow, app permissions" decoding="async">
+            <span class="ph"><span class="big">[ NO SIGNAL ]</span><span>FILE NOT FOUND:</span><span class="path">./images/poster5.jpg</span></span>
+          </button>
+          <figcaption><span class="id">POSTER_05.JPG</span> :: Think before you click Allow</figcaption>
+        </figure>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- =================== 03 PRESENTATION (PDF VIEWER) =================== -->
+<section id="presentation" aria-labelledby="h-pres">
+  <div class="win">
+    <div class="win-bar">
+      <h2 id="h-pres">[03] PRESENTATION.PDF</h2><span class="fill" data-fill="-"></span><span class="ctl">[_][#][X]</span>
+    </div>
+    <div class="win-body">
+      <p class="lead">Flip through our exhibition slides right here.</p>
+
+      <!--
+        EDIT: PDF path. Put your slides at ./assets/presentation.pdf (or change BOTH places below).
+        Desktop browsers show the PDF inline. Many phone browsers cannot, so the links below always work.
+      -->
+      <iframe class="pdf-frame" title="Exhibition presentation slides (PDF)" src="./assets/presentation.pdf#view=FitH">
+        <p>Your browser cannot display embedded PDFs.
+           <a href="./assets/presentation.pdf" download>Download the slides</a>.</p>
+      </iframe>
+
+      <div class="toolbar">
+        <a class="btn" href="./assets/presentation.pdf" download>[ DOWNLOAD_PDF ]</a>
+        <a class="btn" href="./assets/presentation.pdf" target="_blank" rel="noopener">[ OPEN_IN_NEW_TAB ]</a>
+      </div>
+      <p class="dim" style="margin-top:.6rem">&gt; Slides blank or missing on your phone? Use the buttons above.</p>
+    </div>
+  </div>
+</section>
+
+
+<!-- =================== 04 INTERACTIVE LABS (LAPTOP ONLY) =================== -->
+<section id="labs" aria-labelledby="h-labs">
+  <div class="win">
+    <div class="win-bar">
+      <h2 id="h-labs">[04] INTERACTIVE_LABS.EXE</h2><span class="fill" data-fill="-"></span><span class="ctl">[_][#][X]</span>
+    </div>
+    <div class="win-body">
+      <p class="lead">Hands-on demos. They open in a new tab and need a laptop or desktop with a keyboard.</p>
+
+      <div class="labs">
+
+        <!--
+          EDIT: LAB LINKS. Change the href of each launch button to where you host the demo.
+          Suggested layout: put the files in a /labs folder next to index.html.
+          Every launch link needs: class="launch", target="_blank" and rel="noopener".
+        -->
+        <article class="lab">
+          <h3>&gt; PANOPTICON_RUNNER.EXE</h3>
+          <p>A retro arcade runner with a twist: grab the "free" rewards, then see what the game learned about you.</p>
+          <dl>
+            <dt>NEEDS</dt><dd>Laptop/desktop, Chrome or Edge, keyboard</dd>
+            <dt>OPTIONAL</dt><dd>Webcam (face is turned to text, never saved)</dd>
+            <dt>BY</dt><dd>Prudhivi Siva Sai Devesh</dd>
+          </dl>
+          <a class="btn launch" href="./labs/panopticon_runner.html" target="_blank" rel="noopener">[ LAUNCH_RUNNER ]</a>
+        </article>
+
+        <article class="lab">
+          <h3>&gt; PHISHING_EMAIL_GUESSER.EXE</h3>
+          <p>Real email or phishing trap? Read each message and make the call. <span class="dim">(EDIT description)</span></p>
+          <dl>
+            <dt>NEEDS</dt><dd>Laptop/desktop, any modern browser</dd>
+            <dt>BY</dt><dd>Gurijala Tanushka Reddy</dd>
+          </dl>
+          <a class="btn launch" href="./labs/phishing_guesser.html" target="_blank" rel="noopener">[ LAUNCH_PHISHING_GUESSER ]</a>
+        </article>
+
+        <article class="lab">
+          <h3>&gt; HACK_DEMO.EXE</h3>
+          <p>A live look at how an attacker gets in, and how to stop them. <span class="dim">(EDIT description)</span></p>
+          <dl>
+            <dt>NEEDS</dt><dd>Laptop/desktop, any modern browser</dd>
+            <dt>BY</dt><dd>B Karthik</dd>
+          </dl>
+          <a class="btn launch" href="./labs/hack_demo.html" target="_blank" rel="noopener">[ LAUNCH_HACK_DEMO ]</a>
+        </article>
+
+      </div>
+
+      <!-- Shown by JS when a phone/tablet visitor presses a LAUNCH button -->
+      <div id="deny" class="deny" role="alert" hidden>
+        <div class="head">[ACCESS DENIED: DESKTOP/LAPTOP TERMINAL REQUIRED]</div>
+        <div class="hr" data-fill="-" style="color:var(--red);border-color:var(--red);margin:.4rem 0"></div>
+        <div>ERROR 0x403: mobile device detected. This module needs a keyboard and a large screen.
+             Please reopen this site on a laptop or desktop computer to launch it.</div>
+        <div class="hr" data-fill="-" style="color:var(--red);border-color:var(--red);margin:.4rem 0"></div>
+        <button type="button" id="deny-close">[ ACKNOWLEDGE ]</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- =================== 05 TEAM CREDITS =================== -->
+<section id="credits" aria-labelledby="h-credits">
+  <div class="win">
+    <div class="win-bar">
+      <h2 id="h-credits">[05] CREDITS.TXT</h2><span class="fill" data-fill="-"></span><span class="ctl">[_][#][X]</span>
+    </div>
+    <div class="win-body">
+      <pre class="dir">C:\TECHNO-ETHICS&gt; <b>TYPE CREDITS.TXT</b>
+PROJECT ..... TECHNO-ETHICS: VIRTUAL EXPERIENCE CENTRE
+EVENT ....... Ethics and Values LABFAT / 2026
+INSTITUTION . VIT-AP University</pre>
+      <div class="hr" data-fill="-"></div>
+
+      <div class="members">
+        <!--
+          EDIT: TEAM MEMBERS. Copy / delete a whole <article class="member"> block per person.
+          Change the name in <h3>, the REG NO, and WORKED ON.
+        -->
+        <article class="member">
+          <h3>&gt; [001] KUMAR_ADITYA</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7129</dd>
+            <dt>WORKED ON</dt><dd>PPT Maker, Presenter</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [002] AHMED_ZIYAN</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7132</dd>
+            <dt>WORKED ON</dt><dd>Presenter</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [003] KARTIK_GHAI</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7133</dd>
+            <dt>WORKED ON</dt><dd>Presenter, Posters</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [004] PRUDHIVI_SIVA_SAI_DEVESH</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7140</dd>
+            <dt>WORKED ON</dt><dd>Posters, Panopticon Runner (game)</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [005] ACHYUT_SHARMA</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7141</dd>
+            <dt>WORKED ON</dt><dd>Posters</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [006] KANCHI_SATHYA</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7142</dd>
+            <dt>WORKED ON</dt><dd>Posters</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [007] MALLELA_GAVASKAR</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7144</dd>
+            <dt>WORKED ON</dt><dd>Presenter, Posters</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [008] SYED_MOHAMMED_MOIN</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7146</dd>
+            <dt>WORKED ON</dt><dd>PPT Maker, Presenter</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [009] B_KARTHIK</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7149</dd>
+            <dt>WORKED ON</dt><dd>Presenter, Hack Demo</dd>
+          </dl>
+        </article>
+
+        <article class="member">
+          <h3>&gt; [010] GURIJALA_TANUSHKA_REDDY</h3>
+          <dl>
+            <dt>REG NO</dt><dd>26BEC7157</dd>
+            <dt>WORKED ON</dt><dd>Posters, Phishing Email Guesser</dd>
+          </dl>
+        </article>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="hr" data-fill="=" style="margin-top:0"></div>
+  <p>C:\TECHNO-ETHICS&gt; <span class="cursor" aria-hidden="true"></span></p>
+    <p class="dim">&copy; 2026 VIT-AP University. Built for the Ethics and Values LABFAT exhibition. No visitor data is collected by this site.</p>
+  <p><a href="#top">[ ^ BACK_TO_TOP ]</a></p>
+</footer>
+
+</main>
+
+
+<!-- =================== IMAGE VIEWER MODAL (used by photos + posters) =================== -->
+<div id="viewer" class="viewer" hidden role="dialog" aria-modal="true" aria-label="Image viewer">
+  <div class="win">
+    <div class="win-bar">
+      <h2 id="v-title">IMGVIEW.EXE</h2><span class="fill" data-fill="-"></span>
+      <button type="button" id="v-close" aria-label="Close viewer">[X]</button>
+    </div>
+    <div class="v-stage">
+      <button type="button" class="v-nav" id="v-prev" aria-label="Previous image">[&lt;]</button>
+      <img id="v-img" alt="">
+      <button type="button" class="v-nav" id="v-next" aria-label="Next image">[&gt;]</button>
+    </div>
+    <div class="v-cap" id="v-cap"></div>
+  </div>
+</div>
+
+
+<script>
+/* =====================================================================
+   JAVASCRIPT
+   1. ASCII filler lines        4. Image viewer (modal)
+   2. Boot sequence             5. Device detection + lab launcher
+   3. Nav scroll-spy            6. Missing-image placeholders
+   ===================================================================== */
+(function () {
+  'use strict';
+  var reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- 1. Fill ASCII dividers (data-fill="-" or "=") ---------- */
+  document.querySelectorAll('[data-fill]').forEach(function (el) {
+    el.textContent = el.dataset.fill.repeat(400);
+    el.setAttribute('aria-hidden', 'true');
+  });
+
+  /* ---------- 2. Boot sequence (typed once on page load) ---------- */
+  // EDIT: change these lines if you like. <b>..</b> shows the OK in bright green.
+  var bootLines = [
+    '> BOOTING TECHNO-ETHICS OS v1.0 ............ <b>OK</b>',
+    '> MEMORY CHECK ............................. <b>640K OK</b>',
+    '> MODULE: DIGITAL_SURVEILLANCE ............. <b>LOADED</b>',
+    '> MODULE: DATA_PRIVACY ..................... <b>LOADED</b>',
+    '> MODULE: CYBERSECURITY .................... <b>LOADED</b>',
+    '> ALL SYSTEMS NOMINAL. WELCOME, VISITOR.'
+  ];
+  var bootEl = document.getElementById('boot');
+  function showBoot() { bootEl.innerHTML = bootLines.join('\n') + ' <span class="cursor"></span>'; }
+  if (reduceMotion) {
+    showBoot();
+  } else {
+    var li = 0;
+    (function nextLine() {
+      if (li >= bootLines.length) { showBoot(); return; }
+      bootEl.innerHTML = bootLines.slice(0, li + 1).join('\n') + ' <span class="cursor"></span>';
+      li++;
+      setTimeout(nextLine, 330);
+    })();
+  }
+
+  /* ---------- 3. Nav scroll-spy: highlight the section being viewed ---------- */
+  var links = document.querySelectorAll('.nav a');
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        links.forEach(function (a) { a.classList.toggle('active', a.getAttribute('href') === '#' + en.target.id); });
+      });
+    }, { rootMargin: '-30% 0px -60% 0px' });
+    document.querySelectorAll('main section').forEach(function (s) { io.observe(s); });
+  }
+
+  /* ---------- 4. Image viewer (click-to-enlarge) ---------- */
+  var viewer = document.getElementById('viewer');
+  var vImg = document.getElementById('v-img');
+  var vCap = document.getElementById('v-cap');
+  var vTitle = document.getElementById('v-title');
+  var vPrev = document.getElementById('v-prev');
+  var vNext = document.getElementById('v-next');
+  var vClose = document.getElementById('v-close');
+  var current = [];   // buttons in the currently opened gallery
+  var idx = 0;
+  var opener = null;
+
+  function galleryButtons(btn) {
+    var grid = btn.closest('[data-gallery]');
+    return Array.prototype.filter.call(grid.querySelectorAll('[data-zoom]'), function (b) {
+      return !b.classList.contains('missing');
+    });
+  }
+  function render() {
+    var b = current[idx];
+    var img = b.querySelector('img');
+    var cap = b.parentNode.querySelector('figcaption');
+    vImg.src = img.currentSrc || img.src;
+    vImg.alt = img.alt;
+    vCap.textContent = cap ? cap.textContent : '';
+    vTitle.textContent = 'IMGVIEW.EXE  ' + (idx + 1) + '/' + current.length;
+    vPrev.disabled = idx === 0;
+    vNext.disabled = idx === current.length - 1;
+  }
+  function openViewer(btn) {
+    current = galleryButtons(btn);
+    idx = Math.max(0, current.indexOf(btn));
+    opener = btn;
+    render();
+    viewer.hidden = false;
+    document.body.style.overflow = 'hidden';
+    vClose.focus();
+  }
+  function closeViewer() {
+    viewer.hidden = true;
+    vImg.removeAttribute('src');
+    document.body.style.overflow = '';
+    if (opener) opener.focus();
+  }
+  function step(d) {
+    var n = idx + d;
+    if (n < 0 || n >= current.length) return;
+    idx = n; render();
+  }
+  document.querySelectorAll('[data-zoom]').forEach(function (b) {
+    b.addEventListener('click', function () { if (!b.classList.contains('missing')) openViewer(b); });
+  });
+  vClose.addEventListener('click', closeViewer);
+  vPrev.addEventListener('click', function () { step(-1); });
+  vNext.addEventListener('click', function () { step(1); });
+  viewer.addEventListener('click', function (e) { if (e.target === viewer) closeViewer(); });   // click backdrop
+  document.addEventListener('keydown', function (e) {
+    if (viewer.hidden) return;
+    if (e.key === 'Escape') closeViewer();
+    else if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === 'ArrowRight') step(1);
+    else if (e.key === 'Tab') {                       // keep keyboard focus inside the viewer
+      var f = [vClose, vPrev, vNext].filter(function (x) { return !x.disabled; });
+      var i = f.indexOf(document.activeElement);
+      e.preventDefault();
+      f[(i + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+    }
+  });
+
+  /* ---------- 5. Device detection + lab launcher ---------- */
+  // Returns true only for laptops/desktops. Phones and tablets (including iPadOS,
+  // which pretends to be a Mac) return false.
+  // Testing: in Chrome DevTools click the device-toolbar icon and pick "iPhone" or "iPad".
+  function isDesktopTerminal() {
+    var ua = navigator.userAgent || '';
+    var uaData = navigator.userAgentData;
+    if (uaData && uaData.mobile) return false;                                   // Chromium reports mobile
+    if (/Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle|PlayBook|BlackBerry|Opera Mini|IEMobile|webOS/i.test(ua)) return false;
+    if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return false;   // iPadOS
+    // Touch-only device with no mouse/trackpad at all. Touch laptops still pass because they have a fine pointer.
+    if (window.matchMedia && matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches) return false;
+    return true;
+  }
+
+  var deny = document.getElementById('deny');
+  document.querySelectorAll('a.launch').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      if (isDesktopTerminal()) return;             // laptop/desktop: let the normal target="_blank" link open
+      e.preventDefault();                          // phone/tablet: block the link, show the warning instead
+      deny.hidden = false;
+      deny.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+    });
+  });
+  document.getElementById('deny-close').addEventListener('click', function () { deny.hidden = true; });
+
+  /* ---------- 6. Missing-image placeholders ---------- */
+  // If a file in ./images is missing, show a "NO SIGNAL" frame with the expected path.
+  function markMissing(img) {
+    var holder = img.closest('[data-zoom]');
+    if (holder) holder.classList.add('missing');
+  }
+  document.querySelectorAll('[data-zoom] img').forEach(function (img) {
+    img.addEventListener('error', function () { markMissing(img); });
+    if (img.complete && img.naturalWidth === 0) markMissing(img);   // already failed before this script ran
+  });
+})();
+</script>
+</body>
+</html>
